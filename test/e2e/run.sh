@@ -29,6 +29,8 @@ usage() {
     echo "$DEMO_TITLE"
     echo "Usage: [VAR=VALUE] ./run.sh MODE [SCRIPT]"
     echo "  MODE:     \"play\" plays the test as a demo."
+    echo "            \"init\" creates a vanilla single node cluster without CRI-RM."
+    echo "            \"add\" adds a vanilla worker node to existing single node cluster."
     echo "            \"record\" plays and records the demo."
     echo "            \"test\" runs fast, reports pass or fail."
     echo "            \"debug\" enables cri-resmgr debugging."
@@ -166,8 +168,18 @@ screen-launch-cri-resmgr() {
 
 screen-create-singlenode-cluster() {
     speed=60 out "### Setting up single-node Kubernetes cluster."
-    speed=60 out "### CRI Resource Manager + containerd will act as the container runtime."
+    if [ $mode == "init" ]; then
+        speed=60 out "### Containerd will act as the container runtime."
+    else
+        speed=60 out "### CRI Resource Manager + containerd will act as the container runtime."
+    fi
     vm-create-singlenode-cluster
+}
+
+screen-node-join-cluster() {
+    speed=60 out "### Joining node to Kubernetes cluster."
+    speed=60 out "### Containerd will act as the container runtime."
+    vm-node-join-cluster
 }
 
 screen-launch-cri-resmgr-agent() {
@@ -959,7 +971,9 @@ user_script_file=$2
 distro=${distro:=$DEFAULT_DISTRO}
 cri=${cri:=containerd}
 TOPOLOGY_DIR=${TOPOLOGY_DIR:=e2e}
-vm=${vm:=$(basename ${TOPOLOGY_DIR})-${distro}-${cri}}
+if [ "$mode" != "init" ]; then
+    vm=${vm:=$(basename ${TOPOLOGY_DIR})-${distro}-${cri}}
+fi
 vm_files=${vm_files:-""}
 cri_resmgr_cfg=${cri_resmgr_cfg:-"${SCRIPT_DIR}/cri-resmgr-topology-aware.cfg"}
 cri_resmgr_extra_args=${cri_resmgr_extra_args:-""}
@@ -1035,6 +1049,11 @@ if [ "$mode" == "help" ]; then
 elif [ "$mode" == "play" ]; then
     speed=${speed-10}
 elif [ "$mode" == "test" ]; then
+     PV=
+elif [ "$mode" == "init" ]; then
+    vm=${vm:=master-$(basename ${TOPOLOGY_DIR})-${distro}-${cri}}	
+    PV=
+elif [ "$mode" == "join" ]; then
     PV=
 elif [ "$mode" == "debug" ]; then
     PV=
@@ -1074,10 +1093,12 @@ for var in $input_var_names; do
     fi
 done
 
-if [ "$binsrc" == "local" ]; then
-    [ -f "${BIN_DIR}/cri-resmgr" ] || error "missing \"${BIN_DIR}/cri-resmgr\""
-    if [ "$omit_agent" != "1" ]; then
-        [ -f "${BIN_DIR}/cri-resmgr-agent" ] || error "missing \"${BIN_DIR}/cri-resmgr-agent\""
+if [[ "$mode" != "init" && "$mode" != "join" ]]; then
+    if [ "$binsrc" == "local" ]; then
+        [ -f "${BIN_DIR}/cri-resmgr" ] || error "missing \"${BIN_DIR}/cri-resmgr\""
+        if [ "$omit_agent" != "1" ]; then
+            [ -f "${BIN_DIR}/cri-resmgr-agent" ] || error "missing \"${BIN_DIR}/cri-resmgr-agent\""
+        fi
     fi
 fi
 
@@ -1097,41 +1118,54 @@ if ! vm-command-q "type -p kubelet >/dev/null"; then
     screen-install-k8s
 fi
 
-if [ "$reinstall_cri_resmgr" == "1" ]; then
-    uninstall cri-resmgr
-fi
+if [[ "$mode" != "init" && "$mode" != "join" ]]; then
+    if [ "$reinstall_cri_resmgr" == "1" ]; then
+        uninstall cri-resmgr
+    fi
 
-if [ "$reinstall_cri_resmgr_agent" == "1" ]; then
-    uninstall cri-resmgr-agent
-fi
+    if [ "$reinstall_cri_resmgr_agent" == "1" ]; then
+        uninstall cri-resmgr-agent
+    fi
 
-if ! vm-command-q "type -p cri-resmgr >/dev/null"; then
-    install cri-resmgr
-fi
+    if ! vm-command-q "type -p cri-resmgr >/dev/null"; then
+        install cri-resmgr
+    fi
 
-if ! vm-command-q "type -p cri-resmgr-agent >/dev/null"; then
-    install cri-resmgr-agent
-fi
+    if ! vm-command-q "type -p cri-resmgr-agent >/dev/null"; then
+        install cri-resmgr-agent
+    fi
 
-# Start cri-resmgr if not already running
-if ! vm-command-q "pidof cri-resmgr" >/dev/null; then
-    screen-launch-cri-resmgr
-fi
+    # Start cri-resmgr if not already running
+    if ! vm-command-q "pidof cri-resmgr" >/dev/null; then
+        screen-launch-cri-resmgr
+    fi
 
-vm-check-binary-cri-resmgr
+    vm-check-binary-cri-resmgr
+
+fi
 
 # Create kubernetes cluster or wait that it is online
-if vm-command-q "[ ! -f /var/lib/kubelet/config.yaml ]"; then
-    screen-create-singlenode-cluster
-else
-    # Wait for kube-apiserver to launch (may be down if the VM was just booted)
-    vm-wait-process kube-apiserver
+if [ "$mode" != "join" ]; then
+    if vm-command-q "[ ! -f /var/lib/kubelet/config.yaml ]"; then
+        screen-create-singlenode-cluster
+    else
+        # Wait for kube-apiserver to launch (may be down if the VM was just booted)
+        vm-wait-process kube-apiserver
+    fi
+    # Save kubeadm join command to ~/.kubeadm-join
+    JOIN_CMD=$(vm-command-q "kubeadm token create --print-join-command")
+    host-command "echo \"$JOIN_CMD\" > ~/.kubeadm-join"
+
+elif [ "$mode" == "join" ]; then
+    screen-node-join-cluster
 fi
 
+if [[ "$mode" != "init" && "$mode" != "join" ]]; then
 # Start cri-resmgr-agent if not already running
-if [ "$omit_agent" != "1" ]; then
-    if ! vm-command-q "pidof cri-resmgr-agent" >/dev/null; then
-        screen-launch-cri-resmgr-agent
+    if [ "$omit_agent" != "1" ]; then
+        if ! vm-command-q "pidof cri-resmgr-agent" >/dev/null; then
+            screen-launch-cri-resmgr-agent
+        fi
     fi
 fi
 
@@ -1152,14 +1186,16 @@ declare -A kind_count # associative arrays for counting created objects, like ki
 eval "${yaml_in_defaults}"
 if [ "$mode" == "interactive" ]; then
     interactive
-else
+elif [[ "$mode" != "init" && "$mode" != "join" ]]; then
     # Run test/demo
     TEST_FAILURES=""
     test-user-code
 fi
 
 # Save logs
-host-command "$SCP $VM_SSH_USER@$VM_IP:cri-resmgr*.output.txt \"$OUTPUT_DIR/\""
+if [[ "$mode" != "init" && "$mode" != "join" ]]; then
+    host-command "$SCP $VM_SSH_USER@$VM_IP:cri-resmgr*.output.txt \"$OUTPUT_DIR/\""
+fi
 
 # Cleanup
 if [ "$cleanup" == "0" ]; then

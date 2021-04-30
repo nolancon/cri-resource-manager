@@ -2,7 +2,7 @@
 GO_URLDIR=https://golang.org/dl
 GO_VERSION=1.14.9
 GOLANG_URL=$GO_URLDIR/go$GO_VERSION.linux-amd64.tar.gz
-CNI_SUBNET=10.217.0.0/16
+CNI_SUBNET=10.244.0.0/16
 
 ###########################################################################
 
@@ -542,17 +542,19 @@ default-setup-proxies() {
 
     local file scope="" append="--append" hn
     hn="$(vm-command-q hostname)"
-
+    if [ -n "$master_name" ]; then
+        MASTER_IP=$(${GOVM} ls | awk "/$master_name/{print \$4}")
+    fi
     for file in /etc/environment /etc/profile.d/proxy.sh; do
         cat <<EOF |
 ${scope}http_proxy=$http_proxy
 ${scope}https_proxy=$https_proxy
 ${scope}ftp_proxy=$ftp_proxy
-${scope}no_proxy=$no_proxy,$VM_IP,10.96.0.0/12,$CNI_SUBNET,$hn,.svc
+${scope}no_proxy=$no_proxy,$VM_IP,10.96.0.0/12,$CNI_SUBNET,$hn,.svc,$MASTER_IP
 ${scope}HTTP_PROXY=$http_proxy
 ${scope}HTTPS_PROXY=$https_proxy
 ${scope}FTP_PROXY=$ftp_proxy
-${scope}NO_PROXY=$no_proxy,$VM_IP,10.96.0.0/12,$CNI_SUBNET,$hn,.svc
+${scope}NO_PROXY=$no_proxy,$VM_IP,10.96.0.0/12,$CNI_SUBNET,$hn,.svc,$MASTER_IP
 EOF
       vm-pipe-to-file $append $file
       scope="export "

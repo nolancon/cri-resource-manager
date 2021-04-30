@@ -663,15 +663,29 @@ vm-install-k8s() {
 
 vm-create-singlenode-cluster() {
     vm-create-cluster
-    vm-command "kubectl taint nodes --all node-role.kubernetes.io/master-"
-    vm-install-cni-"$(distro-k8s-cni)"
+    vm-command "kubectl taint nodes $vm node-role.kubernetes.io/master:NoSchedule-"
+    if [ $mode == "init" ]; then
+	vm-install-flannel
+    else	
+        vm-install-cni-"$(distro-k8s-cni)"
+    fi
     if ! vm-command "kubectl wait --for=condition=Ready node/\$(hostname) --timeout=120s"; then
         command-error "kubectl waiting for node readiness timed out"
     fi
 }
 
+vm-node-join-cluster(){
+    KUBE_JOIN=$(cat $HOME/.kubeadm-join)
+    vm-command 	"$KUBE_JOIN --v=5"
+}
+
 vm-create-cluster() {
-    vm-command "kubeadm init --pod-network-cidr=$CNI_SUBNET --cri-socket /var/run/cri-resmgr/cri-resmgr.sock"
+    if [ $mode == "init" ]; then
+        vm-master-config	    
+        vm-command "kubeadm init --pod-network-cidr=$CNI_SUBNET"
+    else
+        vm-command "kubeadm init --pod-network-cidr=$CNI_SUBNET --cri-socket /var/run/cri-resmgr/cri-resmgr.sock"
+    fi	    
     if ! grep -q "initialized successfully" <<< "$COMMAND_OUTPUT"; then
         command-error "kubeadm init failed"
     fi
@@ -679,6 +693,13 @@ vm-create-cluster() {
     vm-command "cp /etc/kubernetes/admin.conf \$HOME/.kube/config"
     vm-command "mkdir -p ~root/.kube"
     vm-command "cp /etc/kubernetes/admin.conf ~root/.kube/config"
+}
+
+vm-install-flannel(){
+   vm-command "kubectl create -f https://raw.githubusercontent.com/coreos/flannel/master/Documentation/kube-flannel.yml"
+   if ! vm-command "kubectl rollout status --timeout=360s -n kube-system daemonsets/kube-flannel-ds"; then
+	command-error "installing flannel to Kubernetes timed out"
+   fi	
 }
 
 vm-install-cni-cilium() {
