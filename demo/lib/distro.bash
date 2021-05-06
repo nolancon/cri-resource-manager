@@ -550,11 +550,11 @@ default-setup-proxies() {
 ${scope}http_proxy=$http_proxy
 ${scope}https_proxy=$https_proxy
 ${scope}ftp_proxy=$ftp_proxy
-${scope}no_proxy=$no_proxy,$VM_IP,10.96.0.0/12,$CNI_SUBNET,$hn,.svc,$MASTER_IP
+${scope}no_proxy=$no_proxy,$VM_IP,10.96.0.0/12,$CNI_SUBNET,$hn,.svc,.svc.cluster.local,$MASTER_IP
 ${scope}HTTP_PROXY=$http_proxy
 ${scope}HTTPS_PROXY=$https_proxy
 ${scope}FTP_PROXY=$ftp_proxy
-${scope}NO_PROXY=$no_proxy,$VM_IP,10.96.0.0/12,$CNI_SUBNET,$hn,.svc,$MASTER_IP
+${scope}NO_PROXY=$no_proxy,$VM_IP,10.96.0.0/12,$CNI_SUBNET,$hn,.svc,.svc.cluster.local,$MASTER_IP
 EOF
       vm-pipe-to-file $append $file
       scope="export "

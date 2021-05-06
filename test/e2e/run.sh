@@ -1154,9 +1154,7 @@ if [ "$mode" != "join" ]; then
     fi
     # Save kubeadm join command to ~/.kubeadm-join
     JOIN_CMD=$(vm-command-q "kubeadm token create --print-join-command")
-    MASTER_IP=$(vm-command-q "hostname -I | awk '{print $1}'")
     host-command "echo \"$JOIN_CMD\" > ~/.kubeadm-join"
-    host-command "echo \"$MASTER_IP\" > ~/.kubeadm-master-ip"
 
 elif [ "$mode" == "join" ]; then
     screen-node-join-cluster

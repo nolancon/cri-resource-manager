@@ -663,7 +663,7 @@ vm-install-k8s() {
 
 vm-create-singlenode-cluster() {
     vm-create-cluster
-    vm-command "kubectl taint nodes --all node-role.kubernetes.io/master-"
+    vm-command "kubectl taint nodes $vm node-role.kubernetes.io/master:NoSchedule-"
     if [ $mode == "init" ]; then
 	vm-install-flannel
     else	
@@ -675,12 +675,50 @@ vm-create-singlenode-cluster() {
 }
 
 vm-node-join-cluster(){
+    vm-command "rm -rf /etc/cni/net.d && mkdir -p /etc/cni/net.d && cat > /etc/cni/net.d/10-flannel.conflist <<EOF
+{
+  \"name\": \"cbr0\",
+  \"cniVersion\": \"0.3.1\",
+  \"plugins\": [ 
+    {    
+      \"type\": \"flannel\",
+      \"delegate\": {
+        \"hairpinMode\": \"true\",
+        \"isDefaultGateway\": true,
+      }
+    },
+    {
+      \"type\": \"portmap\",
+      \"capabilities\": {
+        \"portMappings\": \"true\",
+      }  
+    }
+  ]
+}
+EOF"
+
     KUBE_JOIN=$(cat $HOME/.kubeadm-join)
-    vm-command 	"sudo $KUBE_JOIN --v=5"
+    vm-command 	"$KUBE_JOIN --v=5"
+}
+
+vm-master-config() {
+    vm-command "setenforce 0"
+    vm-command "sed -i 's/^SELINUX=enforcing$/SELINUX=permissive/' /etc/selinux/config"
+    vm-command "swapoff -a"
+    vm-command "cat <<EOF
+> /etc/sysctl.d/k8s.conf
+net.bridge.bridge-nf-call-ip6tables = 1
+net.bridge.bridge-nf-call-iptables = 1
+EOF"
+   vm-command "echo '1' > /proc/sys/net/bridge/bridge-nf-call-iptables"
+   vm-command "sysctl --system"
+   vm-command "systemctl enable kubelet"
+   vm-command "systemctl restart kubelet"
 }
 
 vm-create-cluster() {
-    if [ $mode == "init" ]; then	
+    if [ $mode == "init" ]; then
+        vm-master-config	    
         vm-command "kubeadm init --pod-network-cidr=$CNI_SUBNET"
     else
         vm-command "kubeadm init --pod-network-cidr=$CNI_SUBNET --cri-socket /var/run/cri-resmgr/cri-resmgr.sock"
@@ -697,7 +735,7 @@ vm-create-cluster() {
 vm-install-flannel(){
    vm-command "kubectl create -f https://raw.githubusercontent.com/coreos/flannel/master/Documentation/kube-flannel.yml"
    if ! vm-command "kubectl rollout status --timeout=360s -n kube-system daemonsets/kube-flannel-ds"; then
-	command-error "installing cilium CNI to Kubernetes timed out"
+	command-error "installing flannel to Kubernetes timed out"
    fi	
 }
 
