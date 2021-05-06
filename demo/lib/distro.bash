@@ -1,8 +1,8 @@
 # shellcheck disable=SC2120
 GO_URLDIR=https://golang.org/dl
-GO_VERSION=1.14.9
+GO_VERSION=1.16.1
 GOLANG_URL=$GO_URLDIR/go$GO_VERSION.linux-amd64.tar.gz
-CNI_SUBNET=10.217.0.0/16
+CNI_SUBNET=10.244.0.0/16
 
 ###########################################################################
 
@@ -512,6 +512,8 @@ rpm-refresh-pkg-db() {
 
 default-bootstrap-commands() {
     cat <<EOF
+swapoff -a
+
 touch /etc/modules-load.d/k8s.conf
 modprobe bridge && echo bridge >> /etc/modules-load.d/k8s.conf || :
 modprobe nf-tables-bridge && echo nf-tables-bridge >> /etc/modules-load.d/k8s.conf || :
@@ -544,6 +546,7 @@ default-setup-proxies() {
     hn="$(vm-command-q hostname)"
     if [ -n "$master_name" ]; then
         MASTER_IP=$(${GOVM} ls | awk "/$master_name/{print \$4}")
+	echo "### MASTER_IP distro $MASTER_IP ###"
     fi
     for file in /etc/environment /etc/profile.d/proxy.sh; do
         cat <<EOF |

@@ -1,4 +1,4 @@
-# shellcheck disable=SC1091
+ shellcheck disable=SC1091
 # shellcheck source=command.bash
 source "$(dirname "${BASH_SOURCE[0]}")/command.bash"
 # shellcheck disable=SC1091
@@ -622,7 +622,7 @@ vm-install-containernetworking() {
     vm-command "pushd \"$CNI_PLUGINS_SOURCE_DIR\" && ./build_linux.sh && mkdir -p /opt/cni && cp -rv bin /opt/cni && popd" || {
         command-error "building and installing cri-tools failed"
     }
-    vm-command "rm -rf /etc/cni/net.d && mkdir -p /etc/cni/net.d && cat > /etc/cni/net.d/10-bridge.conf <<EOF
+    vm-command "rm -rf /etc/cni/net.d && mkdir -p /etc/cni/net.d && cat > /etc/cni/net.d/20-bridge.conf <<EOF
 {
   \"cniVersion\": \"0.4.0\",
   \"name\": \"mynet\",
@@ -675,27 +675,27 @@ vm-create-singlenode-cluster() {
 }
 
 vm-node-join-cluster(){
-    vm-command "rm -rf /etc/cni/net.d && mkdir -p /etc/cni/net.d && cat > /etc/cni/net.d/10-flannel.conflist <<EOF
-{
-  \"name\": \"cbr0\",
-  \"cniVersion\": \"0.3.1\",
-  \"plugins\": [ 
-    {    
-      \"type\": \"flannel\",
-      \"delegate\": {
-        \"hairpinMode\": \"true\",
-        \"isDefaultGateway\": true,
-      }
-    },
-    {
-      \"type\": \"portmap\",
-      \"capabilities\": {
-        \"portMappings\": \"true\",
-      }  
-    }
-  ]
-}
-EOF"
+#    vm-command "rm -rf /etc/cni/net.d && mkdir -p /etc/cni/net.d && cat > /etc/cni/net.d/10-flannel.conflist <<EOF
+#{
+#  \"name\": \"cbr0\",
+#  \"cniVersion\": \"0.3.1\",
+#  \"plugins\": [ 
+#    {    
+#      \"type\": \"flannel\",
+#      \"delegate\": {
+#        \"hairpinMode\": \"true\",
+#        \"isDefaultGateway\": true,
+#      }
+#    },
+#    {
+#      \"type\": \"portmap\",
+#      \"capabilities\": {
+#        \"portMappings\": \"true\",
+#      }  
+#    }
+#  ]
+#}
+#EOF"
 
     KUBE_JOIN=$(cat $HOME/.kubeadm-join)
     vm-command 	"$KUBE_JOIN --v=5"
@@ -718,8 +718,50 @@ EOF"
 
 vm-create-cluster() {
     if [ $mode == "init" ]; then
-        vm-master-config	    
-        vm-command "kubeadm init --pod-network-cidr=$CNI_SUBNET"
+    vm-command "touch /kubeadm-init.yaml"	    
+    vm-command "cat > /kubeadm-init.yaml <<EOF
+apiVersion: kubeadm.k8s.io/v1beta2
+bootstrapTokens:
+- groups:
+  - system:bootstrappers:kubeadm:default-node-token
+  token: abcdef.0123456789abcdef
+  ttl: 24h0m0s
+  usages:
+  - signing
+  - authentication
+kind: InitConfiguration
+localAPIEndpoint:
+  advertiseAddress: 172.16.0.1
+  bindPort: 6443
+nodeRegistration:
+  criSocket: /run/containerd/containerd.sock
+  name: control-plane
+  taints: null
+---
+apiServer:
+  extraArgs:
+    http2-max-streams-per-connection: \"1000\"
+  timeoutForControlPlane: 4m0s
+apiVersion: kubeadm.k8s.io/v1beta2
+certificatesDir: /etc/kubernetes/pki
+clusterName: kubernetes
+controllerManager: {}
+dns:
+  type: CoreDNS
+etcd:
+  local:
+    dataDir: /var/lib/etcd
+imageRepository: k8s.gcr.io
+kind: ClusterConfiguration
+kubernetesVersion: 1.21.0
+networking:
+  dnsDomain: cluster.local
+  podSubnet: 10.244.0.0/16
+  serviceSubnet: 10.96.0.0/12
+scheduler: {}
+EOF"
+        vm-command "kubeadm init --config /kubeadm-init.yaml"
+#        vm-command "kubeadm init --apiserver-advertise-address=$VM_IP --pod-network-cidr=$CNI_SUBNET"
     else
         vm-command "kubeadm init --pod-network-cidr=$CNI_SUBNET --cri-socket /var/run/cri-resmgr/cri-resmgr.sock"
     fi	    
